@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <!-- If you serve this from a server that uses CSRF tokens, replace %CSRF_TOKEN% or inject a real token -->
+  <meta name="csrf-token" content="%CSRF_TOKEN%">
+  <title>Student Registration — Client</title>
+  <style>
+    :root{
+      --bg:#f6f8ff; --card:#ffffff; --accent:#2563eb; --muted:#6b7280; --danger:#dc2626; --ok:#059669;
+    }
+    html,body{height:100%; margin:0; font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial; background:linear-gradient(180deg,var(--bg),#fff);}
+    .wrap{max-width:900px;margin:32px auto;padding:20px;}
+    .card{background:var(--card);border-radius:12px;padding:18px;box-shadow:0 6px 20px rgba(15,23,42,0.06);}
+    h1{margin:0 0 6px;font-size:1.25rem}
+    p.lead{margin:0 0 12px;color:var(--muted)}
+    form{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+    .full{grid-column:1 / -1}
+    label{display:block;font-size:0.86rem;margin-bottom:6px}
+    input[type="text"], select{width:100%;padding:10px;border:1px solid #e6e9ef;border-radius:8px;font-size:0.95rem;box-sizing:border-box}
+    input[type="radio"]{accent-color:var(--accent)}
+    .hint{font-size:0.82rem;color:var(--muted);margin-top:6px}
+    .actions{display:flex;gap:8px;justify-content:flex-end;align-items:center;margin-top:6px;grid-column:1 / -1}
+    button{background:var(--accent);color:#fff;padding:10px 14px;border-radius:8px;border:0;cursor:pointer;font-weight:600}
+    button.ghost{background:transparent;color:#374151;border:1px solid #e6e9ef}
+    .msg{font-size:0.95rem;margin-top:8px}
+    .msg.error{color:var(--danger)}
+    .msg.success{color:var(--ok)}
+    table{width:100%;border-collapse:collapse;margin-top:12px}
+    th,td{padding:8px;border-bottom:1px solid #eef2ff;text-align:left;font-size:0.92rem}
+    .small{font-size:0.82rem;color:var(--muted)}
+    @media (max-width:680px){form{grid-template-columns:1fr}.actions{flex-direction:row-reverse}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card" role="main" aria-labelledby="title">
+      <h1 id="title">Student Registration</h1>
+      <p class="lead">Complete the form below. Fields with * are required. Submissions are sent to the configured API endpoint via AJAX.</p>
+
+      <form id="studentForm" novalidate autocomplete="on">
+        <div>
+          <label for="firstName">First name *</label>
+          <input id="firstName" name="firstName" type="text" required minlength="2" maxlength="50" autocomplete="given-name" placeholder="John" />
+          <div class="hint">Letters, hyphens and spaces allowed.</div>
+        </div>
+
+        <div>
+          <label for="middleName">Middle name</label>
+          <input id="middleName" name="middleName" type="text" maxlength="50" autocomplete="additional-name" placeholder="William" />
+        </div>
+
+        <div>
+          <label for="lastName">Last name *</label>
+          <input id="lastName" name="lastName" type="text" required minlength="2" maxlength="50" autocomplete="family-name" placeholder="Doe" />
+        </div>
+
+        <div>
+          <label for="regNumber">Registration number *</label>
+          <input id="regNumber" name="regNumber" type="text" required maxlength="30" placeholder="e.g. REG-2025-001" inputmode="text" />
+          <div class="hint" id="regHint">Alphanumeric, hyphen (-), underscore (_), slash (/) allowed, 3–30 characters.</div>
+        </div>
+
+        <div>
+          <label for="classSelect">Class *</label>
+          <select id="classSelect" name="class" required>
+            <option value="" disabled selected>Choose class</option>
+          </select>
+        </div>
+
+        <div class="full">
+          <label>Sex *</label>
+          <div role="radiogroup" aria-labelledby="sexLegend" style="display:flex;gap:12px;align-items:center">
+            <label><input type="radio" name="sex" value="Male" required> <span class="small" style="margin-left:6px">Male</span></label>
+            <label><input type="radio" name="sex" value="Female"> <span class="small" style="margin-left:6px">Female</span></label>
+            <label><input type="radio" name="sex" value="Other"> <span class="small" style="margin-left:6px">Other / Prefer not to say</span></label>
+          </div>
+        </div>
+
+        <input type="hidden" id="submittedAt" name="submittedAt" />
+
+        <div class="actions">
+          <button type="button" class="ghost" id="resetBtn">Reset</button>
+          <button type="submit" id="submitBtn">Submit</button>
+        </div>
+
+        <div id="formMessage" class="msg full" aria-live="polite"></div>
+      </form>
+
+      <section id="localSubmissions" class="full" aria-labelledby="localTitle" style="margin-top:18px">
+        <h2 id="localTitle" style="font-size:1rem;margin:0 0 8px 0">Local submission history</h2>
+        <p class="small">Saved in your browser's localStorage. These are copies of successful submissions (client-side) so you can review them even when offline.</p>
+        <div id="subList"></div>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    (function(){
+      // Configuration - change endpoint and class options as needed
+      const API_ENDPOINT = '/api/students'; // server endpoint to POST JSON to
+      const CLASS_OPTIONS = ['Nursery','KG','Primary 1','Primary 2','Primary 3','JSS 1','JSS 2','Senior 1','Senior 2','Other'];
+      const REGEX_REGNUMBER = /^[A-Za-z0-9\-_/]{3,30}$/;
+
+      // DOM
+      const form = document.getElementById('studentForm');
+      const submitBtn = document.getElementById('submitBtn');
+      const resetBtn = document.getElementById('resetBtn');
+      const msgEl = document.getElementById('formMessage');
+      const classSelect = document.getElementById('classSelect');
+      const regNumberInput = document.getElementById('regNumber');
+      const subListEl = document.getElementById('subList');
+
+      // Local storage key
+      const LS_KEY = 'studentRegs_v1';
+
+      // Populate class select
+      (function populateClasses(){
+        CLASS_OPTIONS.forEach(c => {
+          const opt = document.createElement('option');
+          opt.value = c;
+          opt.textContent = c;
+          classSelect.appendChild(opt);
+        });
+      })();
+
+      // Read CSRF token from meta tag or cookie 'XSRF-TOKEN'
+      function getCsrfToken(){
+        const meta = document.querySelector('meta[name="csrf-token"]');
+        if(meta && meta.content && meta.content !== '%CSRF_TOKEN%') return meta.content;
+        const m = document.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]+)/);
+        return m ? decodeURIComponent(m[1]) : null;
+      }
+
+      // Basic client-side validation beyond HTML attributes
+      function validatePayload(payload){
+        const errors = [];
+        if(!payload.firstName || payload.firstName.length < 2) errors.push('First name must be at least 2 characters.');
+        if(payload.middleName && payload.middleName.length > 50) errors.push('Middle name must be 50 characters or less.');
+        if(!payload.lastName || payload.lastName.length < 2) errors.push('Last name must be at least 2 characters.');
+        if(!REGEX_REGNUMBER.test(payload.regNumber)) errors.push('Registration number invalid. Use 3–30 chars: letters, numbers, -, _, /.');
+        if(!CLASS_OPTIONS.includes(payload.class)) errors.push('Please choose a valid class.');
+        if(!['Male','Female','Other'].includes(payload.sex)) errors.push('Please choose sex.');
+        return errors;
+      }
+
+      // Local storage helpers
+      function loadLocalSubs(){
+        try {
+          const raw = localStorage.getItem(LS_KEY);
+          return raw ? JSON.parse(raw) : [];
+        } catch(e){ return []; }
+      }
+      function saveLocalSubs(list){
+        try { localStorage.setItem(LS_KEY, JSON.stringify(list)); } catch(e){ /* ignore */ }
+      }
+
+      function renderLocalSubs(){
+        const list = loadLocalSubs();
+        if(!list.length){
+          subListEl.innerHTML = '<p class="small">No local submissions yet.</p>';
+          return;
+        }
+        const table = document.createElement('table');
+        const thead = document.createElement('thead');
+        thead.innerHTML = '<tr><th>Reg #</th><th>Name</th><th>Class</th><th>Sex</th><th>When</th><th></th></tr>';
+        table.appendChild(thead);
+        const tbody = document.createElement('tbody');
+        list.slice().reverse().forEach((s, idx) => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td>${escapeHtml(s.regNumber)}</td>
+            <td>${escapeHtml((s.firstName + ' ' + (s.middleName ? s.middleName + ' ' : '') + s.lastName).trim())}</td>
+            <td>${escapeHtml(s.class)}</td>
+            <td>${escapeHtml(s.sex)}</td>
+            <td>${escapeHtml(new Date(s.submittedAt).toLocaleString())}</td>
+            <td style="white-space:nowrap"><button data-index="${list.length - 1 - idx}" class="ghost viewBtn">View</button> <button data-index="${list.length - 1 - idx}" class="ghost delBtn">Delete</button></td>
+          `;
+          tbody.appendChild(tr);
+        });
+        table.appendChild(tbody);
+        subListEl.innerHTML = '';
+        subListEl.appendChild(table);
+
+        // attach handlers
+        subListEl.querySelectorAll('.delBtn').forEach(b=>{
+          b.addEventListener('click', (e)=>{
+            const i = parseInt(b.dataset.index,10);
+            const arr = loadLocalSubs();
+            arr.splice(i,1);
+            saveLocalSubs(arr);
+            renderLocalSubs();
+          });
+        });
+        subListEl.querySelectorAll('.viewBtn').forEach(b=>{
+          b.addEventListener('click', ()=>{
+            const i = parseInt(b.dataset.index,10);
+            const arr = loadLocalSubs();
+            const s = arr[i];
+            if(!s) return;
+            populateForm(s);
+            window.scrollTo({top:0,behavior:'smooth'});
+          });
+        });
+      }
+
+      // Escape HTML for safe insertion
+      function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]); }
+
+      // Populate form with an object (used when viewing a local submission)
+      function populateForm(s){
+        form.firstName.value = s.firstName || '';
+        form.middleName.value = s.middleName || '';
+        form.lastName.value = s.lastName || '';
+        form.regNumber.value = s.regNumber || '';
+        form.class.value = s.class || '';
+        const radios = form.querySelectorAll('input[name="sex"]');
+        radios.forEach(r => r.checked = (r.value === s.sex));
+      }
+
+      // Show message
+      function showMessage(text, type){
+        msgEl.textContent = text;
+        msgEl.className = 'msg full ' + (type === 'error' ? 'error' : (type === 'success' ? 'success' : ''));
+      }
+
+      // Form submit
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        showMessage('', '');
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Submitting...';
+
+        const payload = {
+          firstName: form.firstName.value.trim(),
+          middleName: form.middleName.value.trim(),
+          lastName: form.lastName.value.trim(),
+          regNumber: form.regNumber.value.trim(),
+          class: form.class.value,
+          sex: (form.sex && form.sex.value) || (form.querySelector('input[name="sex"]:checked') ? form.querySelector('input[name="sex"]:checked').value : ''),
+          submittedAt: new Date().toISOString()
+        };
+
+        const clientErrors = validatePayload(payload);
+        if(clientErrors.length){
+          showMessage(clientErrors.join(' '), 'error');
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Submit';
+          return;
+        }
+
+        try {
+          const token = getCsrfToken();
+          const res = await fetch(API_ENDPOINT, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(token ? { 'x-csrf-token': token } : {})
+            },
+            credentials: 'same-origin',
+            body: JSON.stringify(payload)
+          });
+
+          const json = await res.json().catch(()=>({}));
+
+          if(!res.ok){
+            if(res.status === 422 && json.errors){
+              // express-validator style errors
+              const msgs = Array.isArray(json.errors) ? json.errors.map(e => e.msg || JSON.stringify(e)).join(' ') : (json.message || res.statusText);
+              showMessage(msgs, 'error');
+            } else if(res.status === 403){
+              showMessage('CSRF validation failed or you are not authorized. Refresh the page and try again.', 'error');
+            } else {
+              showMessage(json.message || ('Submit failed: ' + res.status + ' ' + res.statusText), 'error');
+            }
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Submit';
+            return;
+          }
+
+          // success
+          showMessage(json.message || 'Student registered successfully.', 'success');
+
+          // Save copy locally for review
+          const arr = loadLocalSubs();
+          arr.push(payload);
+          saveLocalSubs(arr);
+          renderLocalSubs();
+
+          form.reset();
+        } catch(err){
+          showMessage('Network or server error: ' + (err && err.message ? err.message : err), 'error');
+        } finally {
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Submit';
+        }
+      });
+
+      // Reset button
+      resetBtn.addEventListener('click', ()=> {
+        form.reset();
+        showMessage('', '');
+      });
+
+      // Instant reg number client-side validation feedback
+      regNumberInput.addEventListener('input', () => {
+        const val = regNumberInput.value.trim();
+        const hint = document.getElementById('regHint');
+        if(val.length === 0) { regNumberInput.style.borderColor=''; hint.textContent = 'Alphanumeric, hyphen, underscore, slash allowed, 3–30 characters.'; return; }
+        if(REGEX_REGNUMBER.test(val)) { regNumberInput.style.borderColor = '#10b981'; hint.textContent = 'Looks good.'; hint.style.color = '#059669'; }
+        else { regNumberInput.style.borderColor = '#dc2626'; hint.textContent = 'Invalid format — use 3–30 chars: letters, numbers, -, _, /.'; hint.style.color = '#dc2626'; }
+      });
+
+      // Initialize local submissions list on load
+      renderLocalSubs();
+
+      // Expose small API for debugging in console
+      window._studentClient = {
+        loadLocalSubs, saveLocalSubs, renderLocalSubs
+      };
+    })();
+  </script>
+</body>
+</html>
